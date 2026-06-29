@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
 
 class ReaderScreen extends StatelessWidget {
-  const ReaderScreen({super.key});
+  final String filePath;
+  final String fileName;
+
+  const ReaderScreen({
+    super.key,
+    required this.filePath,
+    required this.fileName,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Reader Screen Stub'),
+        title: Text(fileName),
       ),
-      body: const Center(
-        child: Text('Reader Screen Stub'),
+      body: Center(
+        child: Text('Reader Screen Stub for:\n$filePath'),
       ),
     );
   }
