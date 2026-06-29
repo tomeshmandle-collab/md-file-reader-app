@@ -6,6 +6,8 @@ import 'package:flutter_highlight/themes/atom-one-light.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown/markdown.dart' as md;
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:md_editor/core/constants.dart';
 import 'package:md_editor/core/theme_manager.dart';
 
@@ -81,6 +83,138 @@ class _ReaderScreenState extends State<ReaderScreen> {
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  Future<String> _getUniqueCopyPath(String parentDir, String originalName) async {
+    String baseName = originalName;
+    String extension = '.md';
+    
+    if (originalName.toLowerCase().endsWith('.md')) {
+      baseName = originalName.substring(0, originalName.length - 3);
+    } else {
+      final lastDot = originalName.lastIndexOf('.');
+      if (lastDot != -1) {
+        baseName = originalName.substring(0, lastDot);
+        extension = originalName.substring(lastDot);
+      }
+    }
+
+    final separator = widget.filePath.contains('\\') ? '\\' : '/';
+    String targetPath = '$parentDir$separator${baseName}_copy$extension';
+    if (!await File(targetPath).exists()) {
+      return targetPath;
+    }
+
+    int count = 1;
+    while (true) {
+      targetPath = '$parentDir$separator${baseName}_copy_$count$extension';
+      if (!await File(targetPath).exists()) {
+        return targetPath;
+      }
+      count++;
+    }
+  }
+
+  Future<void> _saveToFallbackDirectory(String content) async {
+    Directory? directory;
+    try {
+      if (Platform.isAndroid) {
+        directory = await getDownloadsDirectory();
+      }
+    } catch (e) {
+      debugPrint('Error getting downloads directory: $e');
+    }
+    
+    directory ??= await getApplicationDocumentsDirectory();
+
+    final separator = widget.filePath.contains('\\') ? '\\' : '/';
+    final targetPath = await _getUniqueCopyPath(directory.path, widget.fileName);
+    final newFile = File(targetPath);
+    await newFile.writeAsString(content);
+
+    final savedFileName = targetPath.substring(targetPath.lastIndexOf(separator) + 1);
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved to fallback: $savedFileName'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  Future<void> _saveAsCopy() async {
+    final textToSave = _editController.text;
+    bool permissionGranted = false;
+    
+    if (Platform.isAndroid) {
+      final status = await Permission.storage.status;
+      if (status.isGranted) {
+        permissionGranted = true;
+      } else {
+        final result = await Permission.storage.request();
+        if (result.isGranted) {
+          permissionGranted = true;
+        }
+      }
+    } else {
+      permissionGranted = true;
+    }
+
+    if (Platform.isAndroid && !permissionGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Storage permission is required to save files.'),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: () => openAppSettings(),
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      String parentDir = '';
+      final separator = widget.filePath.contains('\\') ? '\\' : '/';
+      final lastSeparatorIdx = widget.filePath.lastIndexOf(separator);
+      if (lastSeparatorIdx != -1) {
+        parentDir = widget.filePath.substring(0, lastSeparatorIdx);
+      } else {
+        throw const FileSystemException('Could not determine parent directory of original file.');
+      }
+
+      final targetPath = await _getUniqueCopyPath(parentDir, widget.fileName);
+      final newFile = File(targetPath);
+      await newFile.writeAsString(textToSave);
+      
+      final savedFileName = targetPath.substring(targetPath.lastIndexOf(separator) + 1);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved as $savedFileName')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Primary save failed: $e. Attempting fallback...');
+      try {
+        await _saveToFallbackDirectory(textToSave);
+      } catch (fallbackError) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to save file: $fallbackError'),
+              action: SnackBarAction(
+                label: 'Settings',
+                onPressed: () => openAppSettings(),
+              ),
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -261,11 +395,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
           width: double.infinity,
           height: 48,
           child: ElevatedButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Save copy functionality coming in Step 5!')),
-              );
-            },
+            onPressed: _saveAsCopy,
             style: ElevatedButton.styleFrom(
               backgroundColor: primaryColor,
               foregroundColor: Colors.white,
